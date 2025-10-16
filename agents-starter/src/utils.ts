@@ -110,7 +110,6 @@ export function cleanupMessages(messages: UIMessage[]): UIMessage[] {
     // Filter out messages with incomplete tool calls
     const hasIncompleteToolCall = message.parts.some((part) => {
       if (!isToolUIPart(part)) return false;
-      // Remove tool calls that are still streaming or awaiting input without results
       return (
         part.state === "input-streaming" ||
         (part.state === "input-available" && !part.output && !part.errorText)
