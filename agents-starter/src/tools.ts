@@ -50,7 +50,16 @@ I'll remind you to water it every ${waterFrequencyDays || 7} days.`;
  * Tool to list all plants in the collection
  */
 const listPlants = tool({
-  description: "List all plants in the collection with their details and status",
+  description: `List all plants in the collection with their details and status.
+
+WHEN TO USE: When user asks to "list", "show", "display", "see" their plants, or asks "what plants do I have?".
+
+EXAMPLES:
+- "List my plants" → Use this tool with no parameters
+- "Show me all my plants" → Use this tool with no parameters
+- "What plants do I have?" → Use this tool with no parameters
+
+NO PARAMETERS REQUIRED: This tool takes no input parameters, just call it directly.`,
   inputSchema: z.object({}),
   execute: async () => {
     const { agent } = getCurrentAgent<PlantCare>();
@@ -92,6 +101,82 @@ const removePlant = tool({
     } catch (error) {
       console.error("Error removing plant:", error);
       return `Error removing plant: ${error}`;
+    }
+  }
+});
+
+/**
+ * Tool to update a plant's details
+ */
+const updatePlant = tool({
+  description: `Update a plant's information including name, location, light requirements, watering frequency, or notes.
+You can identify the plant by either its ID or name.
+
+WHEN TO USE: When user asks to "update", "change", "modify", or "set" any plant property.
+
+EXAMPLES:
+- "Update Pothos to water every 5 days" → Set plantName="Pothos", waterFrequencyDays=5
+- "Change monstera location to bedroom" → Set plantName="monstera", location="bedroom"
+- "Set snake plant light to low light" → Set plantName="snake plant", lightRequirement="low light"
+
+REQUIRED: You must provide either plantId OR plantName to identify which plant to update.
+OPTIONAL: Provide only the fields you want to change (waterFrequencyDays, location, lightRequirement, name, type, notes).`,
+  inputSchema: z.object({
+    plantId: z.string().optional().describe("The ID of the plant to update"),
+    plantName: z.string().optional().describe("The name of the plant to update (alternative to plantId)"),
+    name: z.string().optional().describe("New name for the plant"),
+    type: z.string().optional().describe("New plant type"),
+    location: z.string().optional().describe("New location"),
+    lightRequirement: z.string().optional().describe("New light requirements"),
+    waterFrequencyDays: z.coerce.number().optional().describe("New watering frequency in days"),
+    notes: z.string().optional().describe("New notes")
+  }),
+  execute: async ({ plantId, plantName, name, type, location, lightRequirement, waterFrequencyDays, notes }) => {
+    const { agent } = getCurrentAgent<PlantCare>();
+
+    try {
+      // Find plant by ID or name
+      let targetPlant = null;
+      if (plantId) {
+        targetPlant = agent!.getPlant(plantId);
+      } else if (plantName) {
+        const allPlants = agent!.getPlants();
+        targetPlant = allPlants.find((p: any) =>
+          p.name.toLowerCase() === plantName.toLowerCase() ||
+          p.name.toLowerCase().includes(plantName.toLowerCase())
+        );
+      }
+
+      if (!targetPlant) {
+        return `Plant not found. Use listPlants to see all your plants.`;
+      }
+
+      const updates: any = {};
+      if (name !== undefined) updates.name = name;
+      if (type !== undefined) updates.type = type;
+      if (location !== undefined) updates.location = location;
+      if (lightRequirement !== undefined) updates.lightRequirement = lightRequirement;
+      if (waterFrequencyDays !== undefined) updates.waterFrequencyDays = waterFrequencyDays;
+      if (notes !== undefined) updates.notes = notes;
+
+      const updatedPlant = agent!.updatePlant(String(targetPlant.id), updates);
+
+      if (!updatedPlant) {
+        return `Error updating plant.`;
+      }
+
+      const changes = [];
+      if (waterFrequencyDays !== undefined) {
+        changes.push(`watering frequency to ${waterFrequencyDays} days`);
+      }
+      if (location !== undefined) changes.push(`location to ${location}`);
+      if (lightRequirement !== undefined) changes.push(`light requirements to ${lightRequirement}`);
+      if (name !== undefined) changes.push(`name to ${name}`);
+
+      return `Successfully updated ${targetPlant.name}! Changed: ${changes.join(", ")}.`;
+    } catch (error) {
+      console.error("Error updating plant:", error);
+      return `Error updating plant: ${error}`;
     }
   }
 });
@@ -350,6 +435,7 @@ export const tools = {
   addPlant,
   listPlants,
   removePlant,
+  updatePlant,
   waterPlant,
   checkWateringNeeds,
   getWateringHistory,

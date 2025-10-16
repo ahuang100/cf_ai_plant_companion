@@ -5,6 +5,7 @@ import { isToolUIPart } from "ai";
 import { useAgentChat } from "agents/ai-react";
 import type { UIMessage } from "@ai-sdk/react";
 import type { tools } from "./tools";
+import PlantBook from "@/components/plant-book/PlantBook";
 
 // Component imports
 import { Button } from "@/components/button/Button";
@@ -41,6 +42,7 @@ export default function Chat() {
   const [showDebug, setShowDebug] = useState(false);
   const [textareaHeight, setTextareaHeight] = useState("auto");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -119,6 +121,25 @@ export default function Chat() {
     agentMessages.length > 0 && scrollToBottom();
   }, [agentMessages, scrollToBottom]);
 
+  // Trigger book refresh when plant-related tools are used
+  useEffect(() => {
+    const lastMessage = agentMessages[agentMessages.length - 1];
+    if (lastMessage && lastMessage.role === "assistant") {
+      const hasPlantTool = lastMessage.parts?.some(
+        (part) =>
+          isToolUIPart(part) &&
+          (part.type.includes("addPlant") ||
+            part.type.includes("removePlant") ||
+            part.type.includes("updatePlant") ||
+            part.type.includes("waterPlant") ||
+            part.type.includes("scheduleWateringReminder"))
+      );
+      if (hasPlantTool) {
+        setRefreshTrigger((prev) => prev + 1);
+      }
+    }
+  }, [agentMessages]);
+
   const pendingToolCallConfirmation = agentMessages.some((m: UIMessage) =>
     m.parts?.some(
       (part) =>
@@ -136,9 +157,11 @@ export default function Chat() {
   };
 
   return (
-    <div className="h-[100vh] w-full p-4 flex justify-center items-center bg-fixed overflow-hidden">
+    <div className="h-[100vh] w-full flex bg-fixed overflow-hidden">
       <HasOpenAIKey />
-      <div className="h-[calc(100vh-2rem)] w-full mx-auto max-w-lg flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800">
+      {/* Chat Section - Left Side */}
+      <div className="h-full w-1/2 p-4 flex items-center justify-center">
+        <div className="h-[calc(100vh-2rem)] w-full max-w-2xl flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800">
         <div className="px-4 py-3 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 sticky top-0 z-10">
           <div className="flex items-center justify-center h-8 w-8">
             <svg
@@ -418,6 +441,12 @@ export default function Chat() {
             </div>
           </div>
         </form>
+        </div>
+      </div>
+
+      {/* Plant Book Section - Right Side */}
+      <div className="h-full w-1/2 p-4 flex items-center justify-center bg-gradient-to-br from-neutral-50 to-neutral-100 dark:from-neutral-900 dark:to-neutral-950">
+        <PlantBook agentId="default" refreshTrigger={refreshTrigger} />
       </div>
     </div>
   );

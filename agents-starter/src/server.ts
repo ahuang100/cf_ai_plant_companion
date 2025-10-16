@@ -15,9 +15,8 @@ import { processToolCalls, cleanupMessages } from "./utils";
 import { tools, executions } from "./tools";
 import { createWorkersAI } from "workers-ai-provider";
 
-// Using Llama 3.3 70B on Workers AI
-// Note: Using type assertion as Llama 3.3 is newer than the type definitions
-const createModel = (env: Env) => createWorkersAI({ binding: env.AI })("@cf/meta/llama-3.3-70b-instruct-fp8-fast" as any);
+// Using Llama 3.1 70B - has function calling support built-in
+const createModel = (env: Env) => createWorkersAI({ binding: env.AI })("@cf/meta/llama-3.1-70b-instruct");
 
 
 export class PlantCare extends AIChatAgent<Env> {
@@ -206,6 +205,63 @@ export class PlantCare extends AIChatAgent<Env> {
   }
 
   /**
+   * Update a plant's details
+   */
+  updatePlant(plantId: string, updates: {
+    name?: string;
+    type?: string;
+    location?: string;
+    lightRequirement?: string;
+    waterFrequencyDays?: number;
+    notes?: string;
+  }) {
+    const plant = this.getPlant(plantId);
+    if (!plant) {
+      return null;
+    }
+
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    if (updates.name !== undefined) {
+      fields.push("name = ?");
+      values.push(updates.name);
+    }
+    if (updates.type !== undefined) {
+      fields.push("type = ?");
+      values.push(updates.type);
+    }
+    if (updates.location !== undefined) {
+      fields.push("location = ?");
+      values.push(updates.location);
+    }
+    if (updates.lightRequirement !== undefined) {
+      fields.push("light_requirement = ?");
+      values.push(updates.lightRequirement);
+    }
+    if (updates.waterFrequencyDays !== undefined) {
+      fields.push("water_frequency_days = ?");
+      values.push(updates.waterFrequencyDays);
+    }
+    if (updates.notes !== undefined) {
+      fields.push("notes = ?");
+      values.push(updates.notes);
+    }
+
+    if (fields.length === 0) {
+      return plant; // No updates
+    }
+
+    values.push(plantId);
+    this.db.exec(
+      `UPDATE plants SET ${fields.join(", ")} WHERE id = ?`,
+      ...values
+    );
+
+    return this.getPlant(plantId);
+  }
+
+  /**
    * Handles incoming chat messages and manages the response stream
    */
   async onChatMessage(
@@ -244,16 +300,28 @@ IMPORTANT: You can answer plant care questions directly using your knowledge! Yo
 
 When users ask general plant care questions (like "How often should I water my Pothos?" or "What kind of light does a snake plant need?"), answer them directly with your plant care knowledge.
 
-Use the available tools ONLY when users want to:
-- Track a specific plant in their collection (use addPlant)
-- Record watering events (use waterPlant)
-- Check which tracked plants need water (use checkWateringNeeds)
-- Diagnose issues with a tracked plant (use diagnosePlantIssue)
-- View their plant list (use listPlants)
-- Schedule reminders (use scheduleWateringReminder)
+WHEN TO USE TOOLS:
+You MUST use tools when users want to interact with their tracked plant collection:
 
-If a user asks a general question about plant care, answer it directly without using tools.
-If a user wants to track a plant or manage their collection, use the appropriate tools.
+1. addPlant - Track a new plant
+2. listPlants - View all tracked plants
+3. updatePlant - Change/update/modify a tracked plant's details (watering frequency, location, light, etc.)
+   IMPORTANT: If user says "change", "update", "modify", "set" followed by a plant name and new details, use this tool!
+4. removePlant - Remove a tracked plant
+5. waterPlant - Record a watering event
+6. checkWateringNeeds - See which plants need water
+7. getWateringHistory - View past watering records
+8. diagnosePlantIssue - Diagnose health problems
+9. viewHealthIssues - View health records
+10. getCareTips - Get care advice (rarely needed, you can answer directly)
+11. scheduleWateringReminder - Schedule future reminders
+
+CRITICAL: When a user asks to "update", "change", or "modify" a plant's watering schedule (e.g., "change Pothos to water every 3 days"), you MUST use the updatePlant tool with plantName and waterFrequencyDays parameters.
+
+EXAMPLES:
+- User: "update pothos to water every 3 days" → Use updatePlant tool with plantName="Pothos", waterFrequencyDays=3
+- User: "change my monstera to bright indirect light" → Use updatePlant tool with plantName="monstera", lightRequirement="bright indirect"
+- User: "move snake plant to bedroom" → Use updatePlant tool with plantName="snake plant", location="bedroom"
 
 ${getSchedulePrompt({ date: new Date() })}
 
@@ -303,6 +371,40 @@ Always be encouraging and patient with plant parents. Plant care is a learning p
  */
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
+    const url = new URL(request.url);
+
+    // API endpoint to fetch plants
+    if (url.pathname === "/api/plants") {
+      const agentId = url.searchParams.get("agentId") || "default";
+      const id = env.PlantCare.idFromName(agentId);
+      const stub = env.PlantCare.get(id);
+
+      try {
+        // Call a method on the Durable Object to get plants
+        const plants = (stub as any).getPlants();
+        return Response.json({ plants: await plants });
+      } catch (error) {
+        console.error("Error fetching plants:", error);
+        return Response.json({ plants: [] });
+      }
+    }
+
+    // API endpoint to fetch schedules
+    if (url.pathname === "/api/schedules") {
+      const agentId = url.searchParams.get("agentId") || "default";
+      const id = env.PlantCare.idFromName(agentId);
+      const stub = env.PlantCare.get(id);
+
+      try {
+        // Call a method on the Durable Object to get schedules
+        const schedules = (stub as any).getSchedules();
+        return Response.json({ schedules: await schedules });
+      } catch (error) {
+        console.error("Error fetching schedules:", error);
+        return Response.json({ schedules: [] });
+      }
+    }
+
     return (
       // Route the request to our agent or return 404 if not found
       (await routeAgentRequest(request, env)) ||
